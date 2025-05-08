@@ -1,0 +1,2 @@
+python extract_feature/extract.py --dataflow --csv /output/csv/video_features.csv  --batch_size 45 --num_decoding_thread 4 --clip_len 2 TEST.CHECKPOINT_FILE_PATH models/SLOWFAST_8x8_R50.pkl
+python extract.py --csv output/csv/video_features.csv --num_decoding_thread 4  --clip_len 2 --model_version ViT-B/32

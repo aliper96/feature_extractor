@@ -21,7 +21,7 @@ parser.add_argument(
 parser.add_argument('--batch_size', type=int, default=64,
                     help='batch size')
 parser.add_argument(
-        '--clip_len', type=float, default=3/2,
+        '--clip_len', type=float, default=2,
         help='decoding length of clip (in seconds)')
 parser.add_argument(
         '--overwrite', action='store_true',
@@ -35,66 +35,72 @@ parser.add_argument('--model_version', type=str, default="ViT-B/32",
                     help='Num parallel thread for video decoding')
 args = parser.parse_args()
 
-# model_version = "RN50x4" # "RN50x4"  # "ViT-B/32"
-output_feat_size = 512 if args.model_version == "ViT-B/32" else 640
-dataset = VideoLoader(
-    args.csv,
-    framerate=1/args.clip_len,
-    size=224 if args.model_version == "ViT-B/32" else 288,
-    centercrop=True,
-    overwrite=args.overwrite,
-    model_version=args.model_version
-)
-n_dataset = len(dataset)
-sampler = RandomSequenceSampler(n_dataset, 10)
-loader = DataLoader(
-    dataset,
-    batch_size=1,
-    shuffle=False,
-    num_workers=args.num_decoding_thread,
-    sampler=sampler if n_dataset > 10 else None,
-)
-preprocess = Preprocessing()
-model, _ = clip.load(args.model_version, device="cuda")
+def main():
 
-totatl_num_frames = 0
-with th.no_grad():
-    for k, data in enumerate(tqdm(loader)):
-        input_file = data['input'][0]
-        output_file = data['output'][0]
-        if args.model_version == "RN50x4":
-            output_file = output_file.replace(
-                "clip-vit_features", "clip-rn50x4_features")
-        if os.path.isfile(output_file):
-            # print(f'Video {input_file} already processed.')
-            continue
-        elif not os.path.isfile(input_file):
-            print(f'{input_file}, does not exist.\n')
-        elif len(data['video'].shape) > 4:
-            video = data['video'].squeeze(0)
-            if len(video.shape) == 4:
-                video = preprocess(video)
-                n_chunk = len(video)
-                features = th.cuda.FloatTensor(
-                    n_chunk, output_feat_size).fill_(0)
-                n_iter = int(math.ceil(n_chunk / float(args.batch_size)))
-                for i in range(n_iter):
-                    min_ind = i * args.batch_size
-                    max_ind = (i + 1) * args.batch_size
-                    video_batch = video[min_ind:max_ind].cuda()
-                    batch_features = model.encode_image(video_batch)
-                    features[min_ind:max_ind] = batch_features
-                features = features.cpu().numpy()
-                if args.half_precision:
-                    features = features.astype('float16')
-                totatl_num_frames += features.shape[0]
-                # safeguard output path before saving
-                dirname = os.path.dirname(output_file)
-                if not os.path.exists(dirname):
-                    print(f"Output directory {dirname} does not exists, creating...")
-                    os.makedirs(dirname)
-                np.savez(output_file, features=features)
-        else:
-            print(f'{input_file}, failed at ffprobe.\n')
+    # model_version = "RN50x4" # "RN50x4"  # "ViT-B/32"
+    output_feat_size = 512 if args.model_version == "ViT-B/32" else 640
+    dataset = VideoLoader(
+        args.csv,
+        framerate=1/args.clip_len,
+        size=224 if args.model_version == "ViT-B/32" else 288,
+        centercrop=True,
+        overwrite=args.overwrite,
+        model_version=args.model_version
+    )
+    n_dataset = len(dataset)
+    sampler = RandomSequenceSampler(n_dataset, 10)
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=args.num_decoding_thread,
+        sampler=sampler if n_dataset > 10 else None,
+    )
+    preprocess = Preprocessing()
+    model, _ = clip.load(args.model_version, device="cuda")
 
-print(f"Total number of frames: {totatl_num_frames}")
+    totatl_num_frames = 0
+    with th.no_grad():
+        for k, data in enumerate(tqdm(loader)):
+            input_file = data['input'][0]
+            output_file = data['output'][0]
+            if args.model_version == "RN50x4":
+                output_file = output_file.replace(
+                    "clip-vit_features", "clip-rn50x4_features")
+            if os.path.isfile(output_file):
+                # print(f'Video {input_file} already processed.')
+                continue
+            elif not os.path.isfile(input_file):
+                print(f'{input_file}, does not exist.\n')
+            elif len(data['video'].shape) > 4:
+                video = data['video'].squeeze(0)
+                if len(video.shape) == 4:
+                    video = preprocess(video)
+                    n_chunk = len(video)
+                    features = th.cuda.FloatTensor(
+                        n_chunk, output_feat_size).fill_(0)
+                    n_iter = int(math.ceil(n_chunk / float(args.batch_size)))
+                    for i in range(n_iter):
+                        min_ind = i * args.batch_size
+                        max_ind = (i + 1) * args.batch_size
+                        video_batch = video[min_ind:max_ind].cuda()
+                        batch_features = model.encode_image(video_batch)
+                        features[min_ind:max_ind] = batch_features
+                    features = features.cpu().numpy()
+                    if args.half_precision:
+                        features = features.astype('float16')
+                    totatl_num_frames += features.shape[0]
+                    # safeguard output path before saving
+                    dirname = os.path.dirname(output_file)
+                    if not os.path.exists(dirname):
+                        print(f"Output directory {dirname} does not exists, creating...")
+                        os.makedirs(dirname)
+                    np.savez(output_file, features=features)
+            else:
+                print(f'{input_file}, failed at ffprobe.\n')
+
+    print(f"Total number of frames: {totatl_num_frames}")
+
+
+if __name__ == "__main__":
+    main()

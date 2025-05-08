@@ -3,7 +3,10 @@ import numpy as np
 from video_loader import (
     VideoLoader, clip_iterator, pack_pathway_output)
 from video_dataflow import VideoDataFlow, ReadVideo
-from dataflow import MultiProcessMapDataZMQ
+# from dataflow import MultiProcessMapDataZMQ
+# from dataflow.dataflow.parallel_map import MultiProcessMapData
+# from dataflow.dataflow.parallel_map import MultiThreadMapData
+
 from torch.utils.data import DataLoader
 import argparse
 from model import build_model
@@ -147,8 +150,13 @@ def perform_test(test_loader, model, preprocess,
         video_shape_len = len(video.shape)
         if video_shape_len == 5:
             n_chunk = len(video)
-            features = th.cuda.HalfTensor(
-                n_chunk, FEATURE_LENGTH).fill_(0)
+            # features = th.cuda.HalfTensor(
+            #     n_chunk, FEATURE_LENGTH).fill_(0)
+            features = th.zeros(
+                (n_chunk, FEATURE_LENGTH),
+                dtype=th.float16,
+                device='cuda'
+            )
             clip_loader = PrefetchLoader(clip_iterator(video, args.batch_size))
 
             for _, (min_ind, max_ind, fast_clip) in enumerate(clip_loader):
@@ -214,7 +222,8 @@ def main():
         size=224, clip_len=args.clip_len, padding_mode='tile',
         min_num_clips=args.min_num_features)
     if args.dataflow:
-        readvideo = ReadVideo(
+        dataset = VideoLoader(
+            args.csv,
             preprocess,
             framerate=args.target_framerate,
             size=224,
@@ -222,17 +231,16 @@ def main():
             pix_fmt=args.pix_fmt,
             overwrite=args.overwrite
         )
-        dataset = VideoDataFlow(args.csv)
-        # dataset = MultiThreadMapData(
-        #     dataset, num_thread=args.num_decoding_thread,
-        #     map_func=readvideo,
-        #     buffer_size=1000)
-        # loader = MultiProcessRunnerZMQ(
-        #     dataset, num_proc=1)
-        loader = MultiProcessMapDataZMQ(
-            dataset, num_proc=args.num_decoding_thread,
-            map_func=readvideo, strict=True)
-        loader.reset_state()
+        n_dataset = len(dataset)
+        sampler = RandomSequenceSampler(n_dataset, 10)
+        loader = DataLoader(
+            dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=args.num_decoding_thread,
+            sampler=sampler if n_dataset > 10 else None,
+        )
+
         n_dataset = len(dataset)
     else:
         dataset = VideoLoader(
